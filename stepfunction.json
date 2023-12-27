@@ -1,0 +1,698 @@
+{
+  "Comment": "Extracts and stores with snapshot",
+  "StartAt": "Configure Batch",
+  "Version": "1.0",
+  "States": {
+    "Configure Batch": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:us-east-1:261454396128:function:configuration:$LATEST",
+      "Next": "Execute Batch"
+    },
+    "Execute Batch": {
+      "Type": "Map",
+      "Iterator": {
+        "StartAt": "Layer 1: Extract",
+        "States": {
+          "Layer 1: Extract": {
+            "Type": "Task",
+            "Resource": "arn:aws:lambda:us-east-1:261454396128:function:extract-and-store-parents:$LATEST",
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "IntervalSeconds": 30,
+                "BackoffRate": 3,
+                "MaxAttempts": 3
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "ResultPath": "$.error",
+                "Next": "Store Error in DynamoDB"
+              }
+            ],
+            "Next": "Is Hierarchical Data"
+          },
+          "Is Hierarchical Data": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Variable": "$.config.extract_type",
+                "StringEquals": "hierarchy_snapshot",
+                "Next": "Layer 2: Map parent value to children list"
+              }
+            ],
+            "Default": "Layer 1: Check cursor"
+          },
+          "Layer 2: Map parent value to children list": {
+            "Type": "Map",
+            "Parameters": {
+              "object.$": "$$.Map.Item.Value.object",
+              "time_window.$": "$$.Map.Item.Value.time_window",
+              "config.$": "$$.Map.Item.Value.config",
+              "parents.$": "$.result",
+              "children.$": "$$.Map.Item.Value.children"
+            },
+            "Iterator": {
+              "StartAt": "Layer 2: Map one process for one parent value",
+              "States": {
+                "Layer 2: Map one process for one parent value": {
+                  "Type": "Map",
+                  "ItemProcessor": {
+                    "ProcessorConfig": {
+                      "Mode": "DISTRIBUTED",
+                      "ExecutionType": "STANDARD"
+                    },
+                    "StartAt": "Layer 2: Extract",
+                    "States": {
+                      "Layer 2: Extract": {
+                        "Type": "Task",
+                        "Resource": "arn:aws:states:::lambda:invoke",
+                        "OutputPath": "$.Payload",
+                        "Parameters": {
+                          "Payload.$": "$",
+                          "FunctionName": "arn:aws:lambda:us-east-1:261454396128:function:extract-and-store-data-by-cursors:$LATEST"
+                        },
+                        "Retry": [
+                          {
+                            "ErrorEquals": [
+                              "Lambda.ServiceException",
+                              "Lambda.AWSLambdaException",
+                              "Lambda.SdkClientException",
+                              "Lambda.TooManyRequestsException"
+                            ],
+                            "BackoffRate": 2,
+                            "IntervalSeconds": 30,
+                            "MaxAttempts": 3
+                          }
+                        ],
+                        "Next": "Layer 2: Check null",
+                        "Catch": [
+                          {
+                            "ErrorEquals": [
+                              "States.ALL"
+                            ],
+                            "Next": "Layer 2: Store Error in DynamoDB",
+                            "ResultPath": "$.error"
+                          }
+                        ]
+                      },
+                      "Layer 2: Check null": {
+                        "Type": "Choice",
+                        "Choices": [
+                          {
+                            "Variable": "$.result",
+                            "IsNull": true,
+                            "Next": "Layer 2: Pass"
+                          }
+                        ],
+                        "Default": "Layer 2: Check layer"
+                      },
+                      "Layer 2: Pass": {
+                        "Type": "Pass",
+                        "End": true
+                      },
+                      "Layer 2: Check layer": {
+                        "Type": "Choice",
+                        "Choices": [
+                          {
+                            "And": [
+                              {
+                                "And": [
+                                  {
+                                    "And": [
+                                      {
+                                        "Not": {
+                                          "Variable": "$.children",
+                                          "IsNull": true
+                                        }
+                                      },
+                                      {
+                                        "Not": {
+                                          "Variable": "$.children",
+                                          "StringEquals": "[]"
+                                        }
+                                      },
+                                      {
+                                        "Not": {
+                                          "Variable": "$.children",
+                                          "StringEquals": ""
+                                        }
+                                      },
+                                      {
+                                        "And": [
+                                          {
+                                            "Not": {
+                                              "Variable": "$.parent",
+                                              "IsNull": true
+                                            }
+                                          },
+                                          {
+                                            "Not": {
+                                              "Variable": "$.parent",
+                                              "StringEquals": "null"
+                                            }
+                                          },
+                                          {
+                                            "Not": {
+                                              "Variable": "$.parent",
+                                              "StringEquals": ""
+                                            }
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ],
+                            "Next": "Layer 3: Map parent value to children list"
+                          }
+                        ],
+                        "Default": "Layer 2: Check cursor"
+                      },
+                      "Layer 3: Map parent value to children list": {
+                        "Type": "Map",
+                        "ItemProcessor": {
+                          "ProcessorConfig": {
+                            "Mode": "INLINE"
+                          },
+                          "StartAt": "Layer 3: Map one process for one parent value",
+                          "States": {
+                            "Layer 3: Map one process for one parent value": {
+                              "Type": "Map",
+                              "ItemProcessor": {
+                                "ProcessorConfig": {
+                                  "Mode": "DISTRIBUTED",
+                                  "ExecutionType": "STANDARD"
+                                },
+                                "StartAt": "Layer 3: Extract",
+                                "States": {
+                                  "Layer 3: Extract": {
+                                    "Type": "Task",
+                                    "Resource": "arn:aws:states:::lambda:invoke",
+                                    "OutputPath": "$.Payload",
+                                    "Parameters": {
+                                      "Payload.$": "$",
+                                      "FunctionName": "arn:aws:lambda:us-east-1:261454396128:function:extract-and-store-data-by-cursors:$LATEST"
+                                    },
+                                    "Retry": [
+                                      {
+                                        "ErrorEquals": [
+                                          "Lambda.ServiceException",
+                                          "Lambda.AWSLambdaException",
+                                          "Lambda.SdkClientException",
+                                          "Lambda.TooManyRequestsException"
+                                        ],
+                                        "BackoffRate": 2,
+                                        "IntervalSeconds": 30,
+                                        "MaxAttempts": 3
+                                      }
+                                    ],
+                                    "Next": "Layer 3: Check null",
+                                    "Catch": [
+                                      {
+                                        "ErrorEquals": [
+                                          "States.ALL"
+                                        ],
+                                        "Next": "Layer 3: Store Error in DynamoDB",
+                                        "ResultPath": "$.error"
+                                      }
+                                    ]
+                                  },
+                                  "Layer 3: Check null": {
+                                    "Type": "Choice",
+                                    "Choices": [
+                                      {
+                                        "Variable": "$.result",
+                                        "IsNull": true,
+                                        "Next": "Layer 3: Pass"
+                                      }
+                                    ],
+                                    "Default": "Layer 3: Check layer"
+                                  },
+                                  "Layer 3: Pass": {
+                                    "Type": "Pass",
+                                    "End": true
+                                  },
+                                  "Layer 3: Check layer": {
+                                    "Type": "Choice",
+                                    "Choices": [
+                                      {
+                                        "And": [
+                                          {
+                                            "Not": {
+                                              "Variable": "$.children",
+                                              "IsNull": true
+                                            }
+                                          },
+                                          {
+                                            "Not": {
+                                              "Variable": "$.children",
+                                              "StringEquals": "[]"
+                                            }
+                                          },
+                                          {
+                                            "Not": {
+                                              "Variable": "$.children",
+                                              "StringEquals": ""
+                                            }
+                                          },
+                                          {
+                                            "Not": {
+                                              "Variable": "$.parent",
+                                              "IsNull": true
+                                            }
+                                          },
+                                          {
+                                            "Not": {
+                                              "Variable": "$.parent",
+                                              "StringEquals": "null"
+                                            }
+                                          },
+                                          {
+                                            "Not": {
+                                              "Variable": "$.parent",
+                                              "StringEquals": ""
+                                            }
+                                          }
+                                        ],
+                                        "Next": "Layer 4: Map parent value to children list"
+                                      }
+                                    ],
+                                    "Default": "Layer 3: Check cursor"
+                                  },
+                                  "Layer 4: Map parent value to children list": {
+                                    "Type": "Map",
+                                    "ItemProcessor": {
+                                      "ProcessorConfig": {
+                                        "Mode": "INLINE"
+                                      },
+                                      "StartAt": "Layer 4: Map one process for one parent value",
+                                      "States": {
+                                        "Layer 4: Map one process for one parent value": {
+                                          "Type": "Map",
+                                          "ItemProcessor": {
+                                            "ProcessorConfig": {
+                                              "Mode": "DISTRIBUTED",
+                                              "ExecutionType": "STANDARD"
+                                            },
+                                            "StartAt": "Layer 4: Extract",
+                                            "States": {
+                                              "Layer 4: Extract": {
+                                                "Type": "Task",
+                                                "Resource": "arn:aws:states:::lambda:invoke",
+                                                "OutputPath": "$.Payload",
+                                                "Parameters": {
+                                                  "Payload.$": "$",
+                                                  "FunctionName": "arn:aws:lambda:us-east-1:261454396128:function:extract-and-store-data-by-cursors:$LATEST"
+                                                },
+                                                "Retry": [
+                                                  {
+                                                    "ErrorEquals": [
+                                                      "Lambda.ServiceException",
+                                                      "Lambda.AWSLambdaException",
+                                                      "Lambda.SdkClientException",
+                                                      "Lambda.TooManyRequestsException"
+                                                    ],
+                                                    "BackoffRate": 2,
+                                                    "IntervalSeconds": 30,
+                                                    "MaxAttempts": 3
+                                                  }
+                                                ],
+                                                "Next": "Layer 4: Check null",
+                                                "Catch": [
+                                                  {
+                                                    "ErrorEquals": [
+                                                      "States.ALL"
+                                                    ],
+                                                    "Next": "Layer 4: Store Error in DynamoDB",
+                                                    "ResultPath": "$.error"
+                                                  }
+                                                ]
+                                              },
+                                              "Layer 4: Check null": {
+                                                "Type": "Choice",
+                                                "Choices": [
+                                                  {
+                                                    "Variable": "$.result",
+                                                    "IsNull": true,
+                                                    "Next": "Layer 4: Pass"
+                                                  }
+                                                ],
+                                                "Default": "Layer 4: Check layer"
+                                              },
+                                              "Layer 4: Pass": {
+                                                "Type": "Pass",
+                                                "End": true
+                                              },
+                                              "Layer 4: Check layer": {
+                                                "Type": "Choice",
+                                                "Choices": [
+                                                  {
+                                                    "And": [
+                                                      {
+                                                        "Not": {
+                                                          "Variable": "$.children",
+                                                          "IsNull": true
+                                                        }
+                                                      },
+                                                      {
+                                                        "Not": {
+                                                          "Variable": "$.children",
+                                                          "StringEquals": "[]"
+                                                        }
+                                                      },
+                                                      {
+                                                        "Not": {
+                                                          "Variable": "$.children",
+                                                          "StringEquals": ""
+                                                        }
+                                                      },
+                                                      {
+                                                        "Not": {
+                                                          "Variable": "$.parent",
+                                                          "IsNull": true
+                                                        }
+                                                      },
+                                                      {
+                                                        "Not": {
+                                                          "Variable": "$.parent",
+                                                          "StringEquals": "null"
+                                                        }
+                                                      },
+                                                      {
+                                                        "Not": {
+                                                          "Variable": "$.parent",
+                                                          "StringEquals": ""
+                                                        }
+                                                      }
+                                                    ],
+                                                    "Next": "Layer 5"
+                                                  }
+                                                ],
+                                                "Default": "Layer 4: Check cursor"
+                                              },
+                                              "Layer 4: Check cursor": {
+                                                "Type": "Choice",
+                                                "Choices": [
+                                                  {
+                                                    "And": [
+                                                      {
+                                                        "Variable": "$.hasNextPage",
+                                                        "BooleanEquals": true
+                                                      },
+                                                      {
+                                                        "Not": {
+                                                          "Variable": "$.hasNextPage",
+                                                          "IsNull": true
+                                                        }
+                                                      },
+                                                      {
+                                                        "Not": {
+                                                          "Variable": "$.hasNextPage",
+                                                          "StringEquals": ""
+                                                        }
+                                                      }
+                                                    ],
+                                                    "Next": "Layer 4: Extract"
+                                                  }
+                                                ],
+                                                "Default": "Layer 4: Pass"
+                                              },
+                                              "Layer 4: Store Error in DynamoDB": {
+                                                "Type": "Task",
+                                                "Resource": "arn:aws:states:::lambda:invoke",
+                                                "OutputPath": "$.Payload",
+                                                "Parameters": {
+                                                  "Payload.$": "$",
+                                                  "FunctionName": "arn:aws:lambda:us-east-1:261454396128:function:store-error-in-dynamodb:$LATEST"
+                                                },
+                                                "Retry": [
+                                                  {
+                                                    "ErrorEquals": [
+                                                      "Lambda.ServiceException",
+                                                      "Lambda.AWSLambdaException",
+                                                      "Lambda.SdkClientException",
+                                                      "Lambda.TooManyRequestsException"
+                                                    ],
+                                                    "IntervalSeconds": 2,
+                                                    "MaxAttempts": 6,
+                                                    "BackoffRate": 2
+                                                  }
+                                                ],
+                                                "Next": "Layer 4: Pass"
+                                              },
+                                              "Layer 5": {
+                                                "Type": "Pass",
+                                                "Next": "Layer 4: Check cursor",
+                                                "ResultPath": null
+                                              }
+                                            }
+                                          },
+                                          "End": true,
+                                          "Label": "Layer4Maponeprocessforoneparentvalue",
+                                          "MaxConcurrency": 5,
+                                          "ItemSelector": {
+                                            "object.$": "$.object",
+                                            "parent.$": "$$.Map.Item.Value",
+                                            "children.$": "$.children",
+                                            "config.$": "$.config",
+                                            "time_window.$": "$.time_window"
+                                          },
+                                          "ItemsPath": "$.parents",
+                                          "ResultPath": null,
+                                          "OutputPath": "$.object"
+                                        }
+                                      }
+                                    },
+                                    "Next": "Layer 3: Check cursor",
+                                    "ResultPath": null,
+                                    "ItemsPath": "$.children",
+                                    "ItemSelector": {
+                                      "object.$": "$$.Map.Item.Value.object",
+                                      "time_window.$": "$$.Map.Item.Value.time_window",
+                                      "config.$": "$$.Map.Item.Value.config",
+                                      "parents.$": "$.result",
+                                      "children.$": "$$.Map.Item.Value.children"
+                                    }
+                                  },
+                                  "Layer 3: Check cursor": {
+                                    "Type": "Choice",
+                                    "Choices": [
+                                      {
+                                        "And": [
+                                          {
+                                            "Variable": "$.hasNextPage",
+                                            "BooleanEquals": true
+                                          },
+                                          {
+                                            "Not": {
+                                              "Variable": "$.hasNextPage",
+                                              "IsNull": true
+                                            }
+                                          },
+                                          {
+                                            "Not": {
+                                              "Variable": "$.hasNextPage",
+                                              "StringEquals": ""
+                                            }
+                                          }
+                                        ],
+                                        "Next": "Layer 3: Extract"
+                                      }
+                                    ],
+                                    "Default": "Layer 3: Pass"
+                                  },
+                                  "Layer 3: Store Error in DynamoDB": {
+                                    "Type": "Task",
+                                    "Resource": "arn:aws:states:::lambda:invoke",
+                                    "OutputPath": "$.Payload",
+                                    "Parameters": {
+                                      "Payload.$": "$",
+                                      "FunctionName": "arn:aws:lambda:us-east-1:261454396128:function:store-error-in-dynamodb:$LATEST"
+                                    },
+                                    "Retry": [
+                                      {
+                                        "ErrorEquals": [
+                                          "Lambda.ServiceException",
+                                          "Lambda.AWSLambdaException",
+                                          "Lambda.SdkClientException",
+                                          "Lambda.TooManyRequestsException"
+                                        ],
+                                        "IntervalSeconds": 2,
+                                        "MaxAttempts": 6,
+                                        "BackoffRate": 2
+                                      }
+                                    ],
+                                    "Next": "Layer 3: Pass"
+                                  }
+                                }
+                              },
+                              "End": true,
+                              "Label": "Layer3Maponeprocessforoneparentvalue",
+                              "MaxConcurrency": 3,
+                              "ItemSelector": {
+                                "object.$": "$.object",
+                                "parent.$": "$$.Map.Item.Value",
+                                "children.$": "$.children",
+                                "config.$": "$.config",
+                                "time_window.$": "$.time_window"
+                              },
+                              "ItemsPath": "$.parents",
+                              "ResultPath": null,
+                              "OutputPath": "$.object"
+                            }
+                          }
+                        },
+                        "Next": "Layer 2: Check cursor",
+                        "ResultPath": null,
+                        "ItemsPath": "$.children",
+                        "ItemSelector": {
+                          "object.$": "$$.Map.Item.Value.object",
+                          "time_window.$": "$$.Map.Item.Value.time_window",
+                          "config.$": "$$.Map.Item.Value.config",
+                          "parents.$": "$.result",
+                          "children.$": "$$.Map.Item.Value.children"
+                        }
+                      },
+                      "Layer 2: Check cursor": {
+                        "Type": "Choice",
+                        "Choices": [
+                          {
+                            "And": [
+                              {
+                                "Variable": "$.hasNextPage",
+                                "BooleanEquals": true
+                              },
+                              {
+                                "Not": {
+                                  "Variable": "$.hasNextPage",
+                                  "IsNull": true
+                                }
+                              },
+                              {
+                                "Not": {
+                                  "Variable": "$.hasNextPage",
+                                  "StringEquals": ""
+                                }
+                              }
+                            ],
+                            "Next": "Layer 2: Extract"
+                          }
+                        ],
+                        "Default": "Layer 2: Pass"
+                      },
+                      "Layer 2: Store Error in DynamoDB": {
+                        "Type": "Task",
+                        "Resource": "arn:aws:states:::lambda:invoke",
+                        "OutputPath": "$.Payload",
+                        "Parameters": {
+                          "Payload.$": "$",
+                          "FunctionName": "arn:aws:lambda:us-east-1:261454396128:function:store-error-in-dynamodb:$LATEST"
+                        },
+                        "Retry": [
+                          {
+                            "ErrorEquals": [
+                              "Lambda.ServiceException",
+                              "Lambda.AWSLambdaException",
+                              "Lambda.SdkClientException",
+                              "Lambda.TooManyRequestsException"
+                            ],
+                            "IntervalSeconds": 2,
+                            "MaxAttempts": 6,
+                            "BackoffRate": 2
+                          }
+                        ],
+                        "Next": "Layer 2: Pass"
+                      }
+                    }
+                  },
+                  "End": true,
+                  "Label": "Layer2Maponeprocessforoneparentvalue",
+                  "MaxConcurrency": 3,
+                  "ItemSelector": {
+                    "object.$": "$.object",
+                    "parent.$": "$$.Map.Item.Value",
+                    "children.$": "$.children",
+                    "config.$": "$.config",
+                    "time_window.$": "$.time_window"
+                  },
+                  "ItemsPath": "$.parents",
+                  "ResultPath": null,
+                  "OutputPath": "$.object"
+                }
+              },
+              "ProcessorConfig": {
+                "Mode": "INLINE"
+              }
+            },
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "ResultPath": "$.error",
+                "Next": "Store Error in DynamoDB"
+              }
+            ],
+            "Next": "Layer 1: Check cursor",
+            "ResultPath": null,
+            "ItemsPath": "$.children"
+          },
+          "Layer 1: Check cursor": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "And": [
+                  {
+                    "Variable": "$.hasNextPage",
+                    "BooleanEquals": true
+                  },
+                  {
+                    "And": [
+                      {
+                        "Not": {
+                          "Variable": "$.hasNextPage",
+                          "IsNull": true
+                        }
+                      },
+                      {
+                        "Not": {
+                          "Variable": "$.hasNextPage",
+                          "StringMatches": ""
+                        }
+                      }
+                    ]
+                  }
+                ],
+                "Next": "Layer 1: Extract"
+              }
+            ],
+            "Default": "Pass"
+          },
+          "Store Error in DynamoDB": {
+            "Type": "Task",
+            "Resource": "arn:aws:lambda:us-east-1:261454396128:function:store-error-in-dynamodb:$LATEST",
+            "Next": "Pass"
+          },
+          "Pass": {
+            "Type": "Pass",
+            "End": true
+          }
+        },
+        "ProcessorConfig": {
+          "Mode": "DISTRIBUTED",
+          "ExecutionType": "STANDARD"
+        }
+      },
+      "End": true,
+      "MaxConcurrency": 2,
+      "Label": "ExecuteBatch"
+    }
+  }
+}

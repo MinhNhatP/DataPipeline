@@ -1,0 +1,38 @@
+[
+    {
+        "object": "organization",
+        "config": {
+            "type": "hierarchy_snapshot",
+            "parent": null,
+            "interval": 5,
+            "key": "id"
+        }
+    },
+    {
+        "object": "repository",
+        "config": {
+            "type": "hierarchy_snapshot",
+            "parent": "organization",
+            "interval": 5,
+            "key": "id"
+        }
+    },
+    {
+        "object": "pullRequest",
+        "config": {
+            "type": "hierarchy_snapshot",
+            "parent": "repository",
+            "interval": 5,
+            "key": "id"
+        }
+    },
+    {
+        "object": "language",
+        "config": {
+            "type": "hierarchy_snapshot",
+            "parent": "repository",
+            "interval": 5,
+            "key": "id"
+        }
+    }
+]
